@@ -1,0 +1,38 @@
+node_modules/
+.DS_Store
+Thumbs.db
+*.log
+.claude/settings.local.json
+
+# ---- 公开仓库（GitHub）：第三方素材与本地文件不上传，来源与授权见 README「素材来源与授权」----
+# 素材：模型、贴图、音效、音乐（含 Unity 商店付费包、游戏提取的模型、商用音乐，不能公开再分发）
+/assets/
+/chinese_tower/
+# 本地备份、中间文件
+/backups/
+/tools/_build/
+/tools/__pycache__/
+/.claude/worktrees/
+# 第三方的笔画数据（Make Me a Hanzi）
+/tools/r27_hanzi_strokes.json
+# 截图里整张的第三方贴图集
+/docs/screenshots/r20_ink_atlas.jpg
+/docs/screenshots/r21_phoenix_textures.jpg
+# 录像：只上传墨里终焉的处决演出、普攻、雷龙破虚、九霄凤焰的几段
+/docs/media/*
+!/docs/media/r29_group.mp4
+!/docs/media/r29_arena.mp4
+!/docs/media/r29_b30kill.mp4
+!/docs/media/r28_normal.mp4
+!/docs/media/r28_slow.mp4
+!/docs/media/r28_crash_compare.mp4
+!/docs/media/r26_light_after.mp4
+!/docs/media/r23_emerge.mp4
+!/docs/media/r23_storm.mp4
+!/docs/media/r23_fifteen.mp4
+!/docs/media/r26_dive_after.mp4
+!/docs/media/r26_diveside_after.mp4
+!/docs/media/r22_dance.mp4
+!/docs/media/r22_steer.mp4
+!/docs/media/r21_strike.mp4
+!/docs/media/r21_guard.mp4

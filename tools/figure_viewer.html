@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>人物与剑器试载（第十五轮）</title>
+<style>html,body{margin:0;height:100%;background:#556;overflow:hidden;font:13px/1.5 sans-serif;color:#eee}#info{position:fixed;left:8px;top:8px;white-space:pre;background:#0008;padding:6px 8px;max-width:46vw;max-height:96vh;overflow:auto}</style>
+<script type="importmap">{ "imports": { "three": "../vendor/three.module.js", "three/addons/": "../vendor/addons/" } }</script>
+</head>
+<body>
+<div id="info">加载中…</div>
+<script type="module">
+// 第十五轮试载页：单独加载人物 glb（与剑器 glb），按「动作名 + 时刻」摆姿势、指定机位取帧、拼图上传（serve.py 的 /__shot）。
+// 控制台 / 预览里调用 window.__fv：
+//   await __fv.load(url)                     载入人物，返回网格、材质、骨骼、动作清单
+//   __fv.pose(clip, t)                       摆到某段动作的第 t 秒（clip 为 null 回到绑定姿势）
+//   await __fv.sword(url, grip)              载入剑器挂到右手（grip：{ pos:[x,y,z], rot:[x,y,z], scale }，手骨本地）
+//   await __fv.sheet(name, items, opts)      items：[{ clip, t, label, az, el, dist, ty }]，逐格取帧拼图，上传为 docs/screenshots/<name>.jpg
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const W = 640, H = 480;
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(W, H); renderer.setPixelRatio(1);
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x8a96a4);
+const camera = new THREE.PerspectiveCamera(35, W / H, 0.02, 500);
+const hemi = new THREE.HemisphereLight(0xdde6f0, 0x5a5048, 1.2); scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff0dd, 2.6); sun.position.set(4, 7, 5); sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -3, right: 3, top: 3, bottom: -3, near: 0.5, far: 30 }); sun.shadow.bias = -0.0004; scene.add(sun);
+// 环境反射（金属需要）：简单的渐变天空做 PMREM
+{
+  const pm = new THREE.PMREMGenerator(renderer);
+  const env = new THREE.Scene();
+  const g = new THREE.SphereGeometry(10, 32, 16);
+  const m = new THREE.ShaderMaterial({ side: THREE.BackSide, vertexShader: 'varying vec3 v; void main(){ v = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }',
+    fragmentShader: 'varying vec3 v; void main(){ float h = v.y; vec3 c = mix(vec3(.42,.40,.36), vec3(.80,.86,.95), smoothstep(-.2, .6, h)); c += vec3(1.,.95,.85) * pow(max(0., dot(v, normalize(vec3(.5,.7,.6)))), 40.) * 3.; gl_FragColor = vec4(c, 1.); }' });
+  env.add(new THREE.Mesh(g, m));
+  scene.environment = pm.fromScene(env, 0.02).texture;
+}
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshStandardMaterial({ color: 0x6d7266, roughness: 0.95 }));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+const grid = new THREE.GridHelper(10, 20, 0x333333, 0x4a4f4a); grid.position.y = 0.002; scene.add(grid);
+const info = document.getElementById('info');
+let fig = null, mixer = null, clips = {}, action = null, hand = null, swordObj = null;
+
+const FV = window.__fv = {
+  async load(url) {
+    if (fig) { scene.remove(fig); }
+    const res = await new GLTFLoader().loadAsync(url + (url.includes('?') ? '&' : '?') + 'v=' + Date.now());
+    fig = res.scene; scene.add(fig);
+    let tris = 0, verts = 0; const mats = [];
+    fig.traverse((o) => {
+      if (o.isMesh) {
+        o.castShadow = o.receiveShadow = true; o.frustumCulled = false;
+        tris += o.geometry.index.count / 3; verts += o.geometry.attributes.position.count;
+        mats.push({ name: o.material.name, type: o.material.type, side: o.material.side, transparent: o.material.transparent, maps: ['map', 'normalMap', 'roughnessMap', 'metalnessMap'].filter((k) => o.material[k]).map((k) => k + ':' + o.material[k].image.width) });
+      }
+      if (o.isBone && o.name === 'mixamorigRightHand') hand = o;
+    });
+    mixer = new THREE.AnimationMixer(fig);
+    clips = Object.fromEntries(res.animations.map((c) => [c.name, c]));
+    const out = { tris, verts, mats, clips: res.animations.map((c) => `${c.name}(${c.duration.toFixed(2)})`), hand: !!hand };
+    info.textContent = JSON.stringify(out, null, 1);
+    return out;
+  },
+  pose(name, t = 0) {
+    mixer.stopAllAction();
+    if (!name) { fig.traverse((o) => { if (o.isSkinnedMesh) o.skeleton.pose(); }); return; }
+    action = mixer.clipAction(clips[name]);
+    action.reset().play(); action.paused = true; action.time = Math.min(t, clips[name].duration);
+    mixer.update(0);
+  },
+  async sword(url, grip = {}) {
+    if (swordObj) { swordObj.parent?.remove(swordObj); swordObj = null; }
+    if (!url) return null;
+    const res = await new GLTFLoader().loadAsync(url);
+    swordObj = res.scene;
+    swordObj.traverse((o) => { if (o.isMesh) { o.castShadow = true; } });
+    hand.add(swordObj);
+    FV.grip(grip);
+    const b = new THREE.Box3().setFromObject(swordObj);
+    return { size: b.getSize(new THREE.Vector3()).toArray().map((v) => +v.toFixed(3)) };
+  },
+  grip({ pos = [0, 0, 0], rot = [0, 0, 0], scale = 1, blade = null, fingers = [0, 1, 0], palm = null, along = 0.075, inward = 0.022, dy = 0, roll = 0 } = {}) {
+    if (!swordObj) return;
+    if (blade) {
+      // 按手骨本地的方向摆剑：剑身（剑的 +Y）朝 blade，刃口（剑的 +X）朝指节，原点（剑柄握持处）放在掌心
+      const b = new THREE.Vector3(...blade).normalize();
+      const f = new THREE.Vector3(...fingers); f.addScaledVector(b, -f.dot(b)).normalize();
+      const z = new THREE.Vector3().crossVectors(f, b);
+      const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(f, b, z));
+      if (roll) q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), roll));
+      const p = new THREE.Vector3(...fingers).multiplyScalar(along).addScaledVector(new THREE.Vector3(...(palm || [0, 0, 0])), inward).addScaledVector(b, dy);
+      swordObj.quaternion.copy(q); swordObj.position.copy(p); swordObj.scale.setScalar(scale);
+      return;
+    }
+    // 手骨的本地单位：骨骼链上若有缩放（Mixamo 常见 0.01），把剑按世界尺寸放回
+    hand.updateWorldMatrix(true, false);
+    const ws = new THREE.Vector3(); hand.matrixWorld.decompose(new THREE.Vector3(), new THREE.Quaternion(), ws);
+    swordObj.position.set(...pos).divideScalar(ws.x);
+    swordObj.rotation.set(...rot);
+    swordObj.scale.setScalar(scale / ws.x);
+  },
+  frame({ az = 0.6, el = 0.18, dist = 3.4, ty = 1.0, tx = 0, tz = 0, fov = 35 } = {}) {
+    camera.fov = fov; camera.updateProjectionMatrix();
+    camera.position.set(tx + Math.sin(az) * Math.cos(el) * dist, ty + Math.sin(el) * dist, tz + Math.cos(az) * Math.cos(el) * dist);
+    camera.lookAt(tx, ty, tz);
+    renderer.render(scene, camera);
+  },
+  async sheet(name, items, { cols = 4, title = '' } = {}) {
+    const rows = Math.ceil(items.length / cols), tw = 400, th = 300, top = title ? 40 : 0;
+    const cv = document.createElement('canvas'); cv.width = cols * tw; cv.height = top + rows * (th + 26);
+    const ctx = cv.getContext('2d'); ctx.fillStyle = '#1b1c1e'; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.font = '20px "Microsoft YaHei",sans-serif'; ctx.fillStyle = '#f0e8d8'; if (title) ctx.fillText(title, 12, 28);
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      FV.pose(it.clip, it.t ?? 0);
+      if (it.grip) FV.grip(it.grip);
+      if (it.focus === 'hand' || it.focus === 'sword') {
+        // 机位对准右手（或剑身中点）
+        fig.updateMatrixWorld(true);
+        const p = new THREE.Vector3();
+        if (it.focus === 'sword' && swordObj) { new THREE.Box3().setFromObject(swordObj).getCenter(p); }
+        else hand.getWorldPosition(p);
+        FV.frame({ ...it, tx: p.x, ty: p.y, tz: p.z });
+      } else FV.frame(it);
+      const x = (i % cols) * tw, y = top + Math.floor(i / cols) * (th + 26);
+      ctx.drawImage(renderer.domElement, 0, 0, W, H, x, y, tw, th);
+      ctx.fillStyle = '#e8e2d4'; ctx.font = '15px "Microsoft YaHei",sans-serif'; ctx.fillText(it.label || `${it.clip} ${(it.t ?? 0).toFixed(2)}s`, x + 8, y + th + 18);
+    }
+    const blob = await new Promise((r) => cv.toBlob(r, 'image/jpeg', 0.9));
+    const res = await fetch('/__shot/' + name, { method: 'POST', body: blob });
+    return { status: res.status, kb: Math.round(blob.size / 1024) };
+  },
+};
+info.textContent = '就绪：window.__fv';
+</script>
+</body>
+</html>

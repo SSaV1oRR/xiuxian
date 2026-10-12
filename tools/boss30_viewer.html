@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>烬狱剑尊试载（第二十四轮）</title>
+<style>html,body{margin:0;height:100%;background:#2a2624;overflow:hidden;font:13px/1.5 sans-serif;color:#eee}#info{position:fixed;left:8px;top:8px;white-space:pre;background:#0008;padding:6px 8px;max-width:46vw;max-height:96vh;overflow:auto}</style>
+<script type="importmap">{ "imports": { "three": "../vendor/three.module.js", "three/addons/": "../vendor/addons/" } }</script>
+</head>
+<body>
+<div id="info">加载中…</div>
+<script type="module">
+// 第二十四轮试载页：单独加载烬狱剑尊的 glb（tools 外的 export_boss30.py + convert_boss30.mjs 产出），检查双面笔画、顶点色、骨骼、剑的握持与各段动作。
+// 控制台 / 预览里调用 window.__bv：
+//   await __bv.load(url)            载入（默认 ../assets/converted/boss30/boss30.glb）
+//   __bv.pose(clip, t)              摆到某段动作的第 t 秒（null 回到绑定姿势）
+//   __bv.view(az, el, dist, ty)     机位（方位角、仰角，弧度；距离；注视高度）
+//   __bv.sword()                    剑柄、剑尖的世界坐标（检查握持）
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+
+const W = innerWidth, H = innerHeight;
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(W, H); renderer.setPixelRatio(1);
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x3a3430);
+const camera = new THREE.PerspectiveCamera(35, W / H, 0.05, 500);
+scene.add(new THREE.HemisphereLight(0xe8e0d8, 0x40302a, 1.4));
+const sun = new THREE.DirectionalLight(0xfff0dd, 2.4); sun.position.set(4, 8, 6); sun.castShadow = true; scene.add(sun);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.MeshStandardMaterial({ color: 0x4a4440, roughness: 0.95 }));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+{ const g = new THREE.GridHelper(10, 10, 0x222222, 0x554a44); g.position.y = 0.002; scene.add(g); }
+const ref = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 1.28, 4, 8), new THREE.MeshStandardMaterial({ color: 0xd8d0c0, roughness: 0.8 }));
+ref.position.set(-1.6, 0.86, 0.6); scene.add(ref);
+const info = document.getElementById('info');
+let fig = null, mixer = null, clips = {}, action = null, sword = null;
+const view = { az: 0.5, el: 0.12, dist: 6.5, ty: 1.2 };
+function place() { camera.position.set(Math.sin(view.az) * Math.cos(view.el) * view.dist, view.ty + Math.sin(view.el) * view.dist, Math.cos(view.az) * Math.cos(view.el) * view.dist); camera.lookAt(0, view.ty, 0); }
+const BV = window.__bv = {
+  THREE, scene, camera, renderer, get fig() { return fig; }, get clips() { return clips; },
+  async load(url = '../assets/converted/boss30/boss30.glb') {
+    if (fig) scene.remove(fig);
+    const res = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(url + '?v=' + Date.now());
+    fig = res.scene; scene.add(fig);
+    let tris = 0, verts = 0; const mats = new Set();
+    fig.traverse((o) => {
+      if (o.isMesh) {
+        o.castShadow = o.receiveShadow = true; o.frustumCulled = false;
+        tris += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3; verts += o.geometry.attributes.position.count;
+        for (const m of [].concat(o.material)) {
+          m.side = THREE.DoubleSide; mats.add(m.name + (m.vertexColors ? '·vc' : '') + (m.alphaTest ? '·a' + m.alphaTest : ''));
+          // 导出时 Blender 给每个材质都写了白色自发光：只有火、光两种笔刷才发光（按顶点色），其余去掉；油画笔刷的金属度贴图是纯白，改成半金属
+          const glow = /Fire|Light/.test(m.name);
+          m.emissive.set(0x000000); m.emissiveMap = null;
+          if (glow) { m.onBeforeCompile = (sh) => { sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vColor.rgb * 2.2;'); }; m.customProgramCacheKey = () => 'b30glow'; }
+          if (m.metalnessMap) { m.metalnessMap = null; m.metalness = 0.35; m.roughnessMap = null; m.roughness = 0.6; }
+          m.needsUpdate = true;
+        }
+      }
+      if (o.name === 'boss30_sword') sword = o;
+    });
+    mixer = new THREE.AnimationMixer(fig); clips = {};
+    for (const c of res.animations) clips[c.name] = c;
+    info.textContent = `三角 ${tris}  顶点 ${verts}\n材质 ${[...mats].join(' / ')}\n动作 ${Object.keys(clips).length}：${Object.keys(clips).join(' ')}\n剑 ${sword ? sword.name + ' ← ' + sword.parent?.name : '无'}`;
+    place(); this.render();
+    return { tris, verts, clips: Object.keys(clips), sword: sword?.parent?.name };
+  },
+  pose(name, t = 0) {
+    if (action) action.stop();
+    if (!name) { fig.traverse((o) => { if (o.isSkinnedMesh) o.skeleton.pose(); }); this.render(); return; }
+    action = mixer.clipAction(clips[name]); action.play(); action.paused = true; action.time = t; mixer.update(0);
+    this.render();
+    return clips[name].duration;
+  },
+  view(az, el, dist, ty) { Object.assign(view, { az, el, dist, ty }); place(); this.render(); },
+  // 剑的握点 / 剑尖（世界坐标）：压缩后剑节点的本地坐标是量化过的，不能按导出时的「+Y 指剑尖」算——与游戏里一样按网格求主轴、离手骨近的一端是剑首、按比例定握点
+  sword() {
+    if (!sword) return null;
+    fig.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(sword.matrixWorld).invert(), pts = [];
+    sword.traverse((o) => { if (!o.isMesh) return; const rel = new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld), pa = o.geometry.attributes.position; for (let i = 0; i < pa.count; i++) pts.push(new THREE.Vector3().fromBufferAttribute(pa, i).applyMatrix4(rel)); });
+    const m = pts.reduce((s, p) => s.add(p), new THREE.Vector3()).divideScalar(pts.length), C = [0, 0, 0, 0, 0, 0];
+    for (const p of pts) { const x = p.x - m.x, y = p.y - m.y, z = p.z - m.z; C[0] += x * x; C[1] += x * y; C[2] += x * z; C[3] += y * y; C[4] += y * z; C[5] += z * z; }
+    const d = new THREE.Vector3(0.3, 0.5, 0.8).normalize();
+    for (let k = 0; k < 40; k++) d.set(C[0] * d.x + C[1] * d.y + C[2] * d.z, C[1] * d.x + C[3] * d.y + C[4] * d.z, C[2] * d.x + C[4] * d.y + C[5] * d.z).normalize();
+    const hand = new THREE.Vector3().setFromMatrixPosition(sword.parent.matrixWorld).applyMatrix4(inv);
+    if (hand.clone().sub(m).dot(d) > 0) d.negate();
+    let t0 = Infinity, t1 = -Infinity; for (const p of pts) { const t = p.clone().sub(m).dot(d); t0 = Math.min(t0, t); t1 = Math.max(t1, t); }
+    const tg = t0 + (t1 - t0) * 0.242 / 1.519;
+    const grip = sword.localToWorld(m.clone().addScaledVector(d, tg)), tip = sword.localToWorld(m.clone().addScaledVector(d, t1));
+    return { grip: grip.toArray().map((v) => +v.toFixed(3)), tip: tip.toArray().map((v) => +v.toFixed(3)), len: +grip.distanceTo(tip).toFixed(3) };
+  },
+  render() { renderer.render(scene, camera); },
+  // 一屏多格：items [{ clip, t, az, el, dist, ty, label }]，按 cols 列排（每格各自的机位），返回各格的标签
+  grid(items, cols = 4) {
+    const W2 = renderer.domElement.width, H2 = renderer.domElement.height, rows = Math.ceil(items.length / cols), w = Math.floor(W2 / cols), h = Math.floor(H2 / rows);
+    renderer.setScissorTest(true); renderer.autoClear = false; renderer.setClearColor(0x3a3430); renderer.clear();
+    const old = { ...view }, asp = camera.aspect;
+    items.forEach((it, i) => {
+      this.pose(it.clip, it.t ?? 0);
+      Object.assign(view, { az: it.az ?? 0.5, el: it.el ?? 0.1, dist: it.dist ?? 6, ty: it.ty ?? 1.1 }); camera.aspect = w / h; camera.updateProjectionMatrix(); place();
+      const x = (i % cols) * w, y = H2 - (Math.floor(i / cols) + 1) * h;
+      renderer.setViewport(x, y, w, h); renderer.setScissor(x, y, w, h); renderer.clear(); renderer.render(scene, camera);
+    });
+    renderer.setScissorTest(false); renderer.setViewport(0, 0, W2, H2); renderer.autoClear = true;
+    Object.assign(view, old); camera.aspect = asp; camera.updateProjectionMatrix();
+    let lab = document.getElementById('lab'); if (!lab) { lab = document.createElement('div'); lab.id = 'lab'; lab.style.cssText = 'position:fixed;inset:0;pointer-events:none;font:12px sans-serif;color:#ffd890'; document.body.appendChild(lab); }
+    lab.innerHTML = items.map((it, i) => `<div style="position:absolute;left:${(i % cols) * (100 / cols)}%;top:${Math.floor(i / cols) * (100 / rows)}%;padding:3px 5px;background:#0008">${it.label || it.clip + ' ' + (it.t ?? 0)}</div>`).join('');
+    return items.length;
+  },
+};
+BV.load().catch((e) => { info.textContent = '载入失败：' + e.message; console.error(e); });
+</script>
+</body>
+</html>

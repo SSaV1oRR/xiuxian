@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>镇塔龙君试载（第十六轮）</title>
+<style>html,body{margin:0;height:100%;background:#556;overflow:hidden;font:13px/1.5 sans-serif;color:#eee}#info{position:fixed;left:8px;top:8px;white-space:pre;background:#0008;padding:6px 8px;max-width:46vw;max-height:96vh;overflow:auto}</style>
+<script type="importmap">{ "imports": { "three": "../vendor/three.module.js", "three/addons/": "../vendor/addons/" } }</script>
+</head>
+<body>
+<div id="info">加载中…</div>
+<script type="module">
+// 第十六轮试载页：单独加载镇塔龙君的 glb，检查网格、贴图集、骨骼与动作；按「动作名 + 时刻」摆姿势、指定机位取帧拼图上传（serve.py 的 /__shot）。
+// 控制台 / 预览里调用 window.__bv：
+//   await __bv.load(url, { tex })            载入；tex 为贴图集目录（给中间产物 boss50_base.glb 换上贴图集预览）
+//   __bv.pose(clip, t)                       摆到某段动作的第 t 秒（clip 为 null 回到绑定姿势）；clip 也可以是 AnimationClip 对象
+//   await __bv.sheet(name, items, opts)      items：[{ clip, t, label, az, el, dist, ty }]，逐格取帧拼图，上传为 docs/screenshots/<name>.jpg
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+
+const W = 640, H = 480;
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(W, H); renderer.setPixelRatio(1);
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x8a96a4);
+const camera = new THREE.PerspectiveCamera(35, W / H, 0.05, 500);
+scene.add(new THREE.HemisphereLight(0xdde6f0, 0x5a5048, 1.3));
+const sun = new THREE.DirectionalLight(0xfff0dd, 2.6); sun.position.set(6, 10, 8); sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -6, right: 6, top: 7, bottom: -2, near: 0.5, far: 40 }); sun.shadow.bias = -0.0004; scene.add(sun);
+{
+  const pm = new THREE.PMREMGenerator(renderer), env = new THREE.Scene();
+  const m = new THREE.ShaderMaterial({ side: THREE.BackSide, vertexShader: 'varying vec3 v; void main(){ v = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }',
+    fragmentShader: 'varying vec3 v; void main(){ float h = v.y; vec3 c = mix(vec3(.42,.40,.36), vec3(.80,.86,.95), smoothstep(-.2, .6, h)); c += vec3(1.,.95,.85) * pow(max(0., dot(v, normalize(vec3(.5,.7,.6)))), 40.) * 3.; gl_FragColor = vec4(c, 1.); }' });
+  env.add(new THREE.Mesh(new THREE.SphereGeometry(10, 32, 16), m));
+  scene.environment = pm.fromScene(env, 0.02).texture;
+}
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshStandardMaterial({ color: 0x6d7266, roughness: 0.95 }));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+const grid = new THREE.GridHelper(20, 20, 0x333333, 0x4a4f4a); grid.position.y = 0.002; scene.add(grid);
+// 1.72 米的人形参照（玩家身高）
+const ref = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 1.28, 4, 8), new THREE.MeshStandardMaterial({ color: 0xd8d0c0, roughness: 0.8 }));
+ref.position.set(-2.6, 0.86, -2.2); ref.castShadow = true; scene.add(ref);
+const info = document.getElementById('info');
+let fig = null, mixer = null, clips = {}, action = null, root = null;
+const loadTex = (url, srgb) => new Promise((res, rej) => new THREE.TextureLoader().load(url, (t) => { t.flipY = false; if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; res(t); }, undefined, rej));
+
+const BV = window.__bv = {
+  THREE, scene, camera, renderer,
+  get fig() { return fig; }, get clips() { return clips; }, get mixer() { return mixer; },
+  async load(url, { tex = null, scale = 1 } = {}) {
+    if (root) scene.remove(root);
+    const res = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(url + (url.includes('?') ? '&' : '?') + 'v=' + Date.now());
+    fig = res.scene; root = new THREE.Group(); root.add(fig); root.scale.setScalar(scale); scene.add(root);
+    let tris = 0, verts = 0, mesh = null;
+    fig.traverse((o) => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; o.frustumCulled = false; mesh = o; tris += o.geometry.index.count / 3; verts += o.geometry.attributes.position.count; } });
+    if (tex) {
+      const [map, nrm, orm] = await Promise.all([loadTex(tex + '/base_4096.jpg', true), loadTex(tex + '/normal_2048.jpg'), loadTex(tex + '/orm_2048.jpg')]);
+      mesh.material = new THREE.MeshStandardMaterial({ map, normalMap: nrm, roughnessMap: orm, metalnessMap: orm, roughness: 1, metalness: 1 });
+    }
+    mixer = new THREE.AnimationMixer(fig);
+    this.rest = []; fig.traverse((o) => { if (o.isBone) this.rest.push([o, o.position.clone(), o.quaternion.clone(), o.scale.clone()]); });
+    clips = Object.fromEntries(res.animations.map((c) => [c.name, c]));
+    const bones = []; fig.traverse((o) => { if (o.isBone) bones.push(o.name); });
+    const box = new THREE.Box3().setFromObject(root);
+    const out = { tris, verts, bones: bones.length, clips: res.animations.map((c) => `${c.name} ${c.duration.toFixed(2)}s`), size: box.getSize(new THREE.Vector3()).toArray().map((v) => +v.toFixed(3)), mat: mesh.material.type };
+    info.textContent = JSON.stringify(out, null, 1);
+    this.view(); this.draw();
+    return out;
+  },
+  bone(name) { let b = null; fig.traverse((o) => { if (o.isBone && o.name === name) b = o; }); return b; },
+  pose(clip, t = 0) {
+    mixer.stopAllAction();
+    root.position.set(0, 0, 0); root.rotation.set(0, 0, 0);
+    if (clip) {
+      const c = typeof clip === 'string' ? (clips[clip] || this.authored?.[clip]) : clip;
+      action = mixer.clipAction(c); action.reset().play(); mixer.setTime(t);
+      const rm = c.userData?.root;                                   // 编排动作的根运动：预览时移动整只龙
+      if (rm) { const T = rm.times; let j = 0; while (j < T.length - 2 && T[j + 1] <= t) j++; const u = Math.min(1, Math.max(0, (t - T[j]) / Math.max(1e-6, T[j + 1] - T[j])));
+        const v = (k) => rm.v[j * 3 + k] + (rm.v[(j + 1) * 3 + k] - rm.v[j * 3 + k]) * u;
+        const yaw0 = root.userData.yaw0 || 0; root.rotation.y = yaw0 + v(2) * Math.PI / 180; root.position.set(Math.sin(yaw0) * v(1) + Math.cos(yaw0) * v(0), 0, Math.cos(yaw0) * v(1) - Math.sin(yaw0) * v(0)); }
+    }
+    else for (const [o, p, q, s] of this.rest) { o.position.copy(p); o.quaternion.copy(q); o.scale.copy(s); }
+    fig.updateMatrixWorld(true);
+    this.draw();
+  },
+  view({ az = 0.5, el = 0.18, dist = 7, ty = 2.2 } = {}) {
+    camera.position.set(Math.sin(az) * Math.cos(el) * dist, ty + Math.sin(el) * dist, Math.cos(az) * Math.cos(el) * dist);
+    camera.lookAt(0, ty, 0);
+  },
+  draw() { renderer.render(scene, camera); },
+  // 姿势编排（src/actors/boss50Pose.js）：建 PoseSpace、把一个 spec 直接摆到模型上
+  async space() { const { PoseSpace } = await import('../src/actors/boss50Pose.js?v=' + Date.now()); this.ps = new PoseSpace(fig, clips.TempMotion); return Object.keys(this.ps.len).map((k) => k + ' ' + this.ps.len[k].toFixed(1)); },
+  async build() { const v = Date.now(); const { buildBossClips } = await import('../src/actors/boss50Clips.js?v=' + v); const t0 = performance.now(); this.authored = buildBossClips(this.ps); return { ms: Math.round(performance.now() - t0), clips: Object.entries(this.authored).map(([k, c]) => `${k} ${c.duration.toFixed(2)}s`) }; },
+  // 一段动作的连续帧（times 缺省按 marks 取）
+  strip(name, times, view = {}) { const c = this.authored[name] || clips[name]; const mk = c.userData?.marks || {}; return times.map((t) => ({ clip: name, t, label: `${name} ${t.toFixed(2)}s` + (Object.entries(mk).find(([k, v]) => Math.abs(v - t) < 0.011) ? ' · ' + Object.entries(mk).find(([k, v]) => Math.abs(v - t) < 0.011)[0] : ''), az: 0.5, dist: 5.2, ty: 0.85, el: 0.1, ...view })); },
+  spec(sp) { mixer.stopAllAction(); const { loc } = this.ps.solve(sp); for (const n of this.ps.order) { const b = this.ps.bones[n]; b.quaternion.copy(loc[n].q); b.position.copy(loc[n].p); } fig.updateMatrixWorld(true); this.draw(); },
+  // 骨的世界位置（米，含 0.01 与外层缩放）
+  wpos(n) { const v = new THREE.Vector3(); this.bone(n).getWorldPosition(v); return v.toArray().map((x) => +x.toFixed(3)); },
+  async post(name, cv) {
+    const blob = await new Promise((r) => cv.toBlob(r, 'image/jpeg', 0.9));
+    const r = await fetch('/__shot/' + name, { method: 'POST', body: blob });
+    return { status: r.status, kb: Math.round(blob.size / 1024) };
+  },
+  // 联系表：items [{ clip, t, label, az, el, dist, ty }]
+  async sheet(name, items, { cols = 4, title = '' } = {}) {
+    const rows = Math.ceil(items.length / cols), top = title ? 40 : 0, lh = 28;
+    const cv = document.createElement('canvas'); cv.width = cols * W; cv.height = top + rows * (H + lh);
+    const g = cv.getContext('2d'); g.fillStyle = '#1b1a18'; g.fillRect(0, 0, cv.width, cv.height);
+    if (title) { g.fillStyle = '#efe6d2'; g.font = '22px "Microsoft YaHei",sans-serif'; g.fillText(title, 12, 28); }
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      this.view(it); if (it.spec) this.spec(it.spec); else if (it.clipObj) this.pose(it.clipObj, it.t || 0); else this.pose(it.clip, it.t || 0);
+      const x = (i % cols) * W, y = top + Math.floor(i / cols) * (H + lh);
+      g.drawImage(renderer.domElement, x, y);
+      g.fillStyle = '#efe6d2'; g.font = '17px "Microsoft YaHei",sans-serif'; g.fillText(it.label || `${it.clip} ${it.t}`, x + 8, y + H + 20);
+    }
+    return this.post(name, cv);
+  },
+};
+info.textContent = '就绪：await __bv.load(url)';
+</script>
+</body>
+</html>

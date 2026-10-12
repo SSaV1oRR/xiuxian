@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>青岚宗 · 山门日常</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div id="app"></div>
+
+  <!-- 载入与开场 -->
+  <div id="loading">
+    <svg class="ink" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+      <defs>
+        <linearGradient id="ink1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#59636a" stop-opacity=".55"/><stop offset="1" stop-color="#59636a" stop-opacity="0"/></linearGradient>
+        <linearGradient id="ink2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2f363c" stop-opacity=".8"/><stop offset="1" stop-color="#2f363c" stop-opacity=".05"/></linearGradient>
+      </defs>
+      <path fill="url(#ink1)" d="M0 600 C120 540 190 450 270 480 C340 400 390 320 460 370 C530 290 580 250 650 330 C730 270 810 370 890 350 C990 240 1070 290 1130 370 C1210 320 1290 410 1370 390 C1450 350 1530 440 1600 420 L1600 900 L0 900Z"/>
+      <path fill="url(#ink2)" d="M0 760 C140 690 220 630 320 660 C420 570 520 610 600 655 C700 600 760 645 860 625 C960 545 1040 605 1140 640 C1240 585 1340 660 1440 640 C1520 625 1560 660 1600 650 L1600 900 L0 900Z"/>
+      <circle cx="1230" cy="200" r="64" fill="#b4473a" opacity=".55"/>
+    </svg>
+    <div class="center">
+      <div class="seal"><span>青</span><span>岚</span></div>
+      <h1>青岚宗</h1>
+      <div class="sub">山门 · 日常</div>
+      <div class="txt">载入中……</div>
+      <div class="bar"><i></i></div>
+      <button id="enter" class="hidden">入　山</button>
+      <div class="keys">WASD 行走 · 空格跳跃 · 移动鼠标转动视角 · 左键剑招 · 右键格挡 · Q R T V 剑诀 · C 闪身 · P 佩剑 · E 交互 · Esc 释放鼠标</div>
+    </div>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div id="place"><span class="seal-s"><i>青</i><i>岚</i></span><div><b id="place-name">山门</b><em id="place-tier">山门与接引区</em><i id="qi-chip" class="spirit">灵气</i></div><div id="clock" title="游戏时间流速为现实的 100 倍"><span class="sun"></span><b>辰时</b><small>初刻</small></div></div>
+    <div id="minimap"><canvas width="360" height="360"></canvas><div class="mm-n">北</div></div>
+    <div id="tracker"></div>
+    <div id="toasts"></div>
+    <div id="banner"><div class="t1"></div><div class="t2"></div></div>
+    <div id="prompt" class="hidden"><kbd>E</kbd><span></span></div>
+    <div id="channel" class="hidden"><div class="ring"><i></i></div><span></span></div>
+    <div id="keys-hint">
+      <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 行走</span>
+      <span><kbd>Shift</kbd> 疾行</span>
+      <span><kbd>空格</kbd> 跳跃</span>
+      <span><kbd>F</kbd> 御剑 / 落地 · 御剑时 <kbd>空格</kbd> 升 <kbd>C</kbd> 降</span>
+      <span>移动鼠标 转动视角</span>
+      <span><kbd>左键</kbd> 流云三连 · <kbd>右键</kbd> 格挡</span>
+      <span><kbd>Q</kbd><kbd>R</kbd><kbd>T</kbd><kbd>V</kbd> 剑诀 · <kbd>C</kbd> 闪身 · <kbd>K</kbd> 剑谱 · <kbd>P</kbd> 佩剑</span>
+      <span><kbd>E</kbd> 交互</span>
+      <span><kbd>Esc</kbd> 释放鼠标</span>
+    </div>
+    <div id="lock-hint" class="hidden"><b>点击画面继续</b><span>移动鼠标转动视角 · 左键剑招 · 右键格挡 · Esc 释放鼠标</span></div>
+    <div id="pause-hint"><b>已暂停</b><span>窗口失去焦点——回到游戏即继续（期间修炼、凤凰、火焰、冷却都不走）</span></div>
+    <div id="phoenix-reticle"><i></i><b></b></div>
+    <div id="prog-badge"><div class="pb-top"><b class="pb-realm"></b><em class="pb-lv"></em></div><div class="pb-bar"><i class="pb-fill"></i></div><small class="pb-sub"></small></div>
+    <div id="ascend-ring"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="44" class="bg"/><circle cx="50" cy="50" r="44" class="fg"/></svg><b>聚气</b><small></small></div>
+    <div id="menu-btns">
+      <button data-open="map" title="舆图 (M)">图<small>M</small></button>
+      <button data-open="journal" title="行记 (J)">记<small>J</small></button>
+      <button data-open="bag" title="行囊 (B)">囊<small>B</small></button>
+      <button data-open="skills" title="剑诀 (K)">诀<small>K</small></button>
+      <button data-open="cultivation" title="修为 (L)">修<small>L</small></button>
+      <button data-open="settings" title="设置 (Esc)">设<small>Esc</small></button>
+    </div>
+    <div id="touch" class="hidden"><div class="stick"><i></i></div><button class="act">交互</button><button class="jump">跳</button><button class="fly">御剑</button><button class="up">升</button><button class="down">降</button></div>
+  </div>
+
+  <!-- 对话 -->
+  <div id="dialog" class="hidden">
+    <div class="who"><b></b><em></em></div>
+    <div class="text"></div>
+    <div class="opts"></div>
+    <div class="hint">E / 空格 继续　·　Esc 离开</div>
+  </div>
+
+  <!-- 面板 -->
+  <div id="panel" class="hidden">
+    <div class="sheet">
+      <button class="close" title="关闭 (Esc)">×</button>
+      <h2></h2>
+      <div class="body"></div>
+    </div>
+  </div>
+
+  <div id="fade"></div>
+
+  <script>
+    // 运行期错误收集（自检用）：window.__errors
+    window.__errors = [];
+    addEventListener('error', (e) => __errors.push(String(e.message || e)));
+    addEventListener('unhandledrejection', (e) => __errors.push('promise: ' + String(e.reason && e.reason.message || e.reason)));
+    for (const k of ['error', 'warn']) { const f = console[k].bind(console); console[k] = (...a) => { __errors.push(k + ': ' + a.map(String).join(' ').slice(0, 300)); f(...a); }; }
+  </script>
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }
+  </script>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

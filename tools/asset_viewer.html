@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>素材试载</title>
+<style>html,body{margin:0;height:100%;background:#556;overflow:hidden;font:13px/1.5 sans-serif;color:#eee}#info{position:fixed;left:8px;top:8px;white-space:pre;background:#0008;padding:6px 8px;max-width:46vw;max-height:96vh;overflow:auto}</style>
+<script type="importmap">{ "imports": { "three": "../vendor/three.module.js", "three/addons/": "../vendor/addons/" } }</script>
+</head>
+<body>
+<div id="info">加载中…</div>
+<script type="module">
+// 新素材试载：单独加载一个模型，在 1.7 米人形参照、1 米网格与 +Z 朝向箭头旁检查尺寸、方向、材质、骨骼与动画
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(1);
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x8a96a4);
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.05, 5000);
+scene.add(new THREE.HemisphereLight(0xdde6f0, 0x5a5048, 1.1));
+const sun = new THREE.DirectionalLight(0xfff0dd, 2.4); sun.position.set(30, 50, 25); sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40, far: 200 }); scene.add(sun);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshStandardMaterial({ color: 0x6d7266 }));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+scene.add(new THREE.GridHelper(100, 100, 0x333333, 0x555555));
+const ref = new THREE.Mesh(new THREE.CapsuleGeometry(0.25, 1.2, 4, 8), new THREE.MeshStandardMaterial({ color: 0xd04040 }));
+ref.position.set(0, 0.85, 0); ref.castShadow = true; scene.add(ref);
+scene.add(new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0.05, 0), 3, 0x30a0ff, 0.6, 0.3));
+const clock = new THREE.Clock();
+let mixer = null, current = null;
+const info = document.getElementById('info');
+
+window.view = async function (url, { x = 0, z = 0, scale = 1, anim = null, maps = null, frame = 1.6, yaw = -0.6, pitch = 0.32 } = {}) {
+  if (current) scene.remove(current);
+  const ext = url.split('.').pop().toLowerCase();
+  const res = ext === 'fbx' ? { scene: await new FBXLoader().loadAsync(url), animations: [] } : await new GLTFLoader().loadAsync(url);
+  const root = res.scene; root.scale.setScalar(scale); root.position.set(x, 0, z);
+  if (ext === 'fbx') res.animations = root.animations || [];
+  const lines = [url];
+  let tris = 0, skinned = 0, bones = 0; const mats = new Map();
+  root.traverse((o) => {
+    if (o.isMesh) {
+      o.castShadow = o.receiveShadow = true;
+      const g = o.geometry; tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
+      if (o.isSkinnedMesh) { skinned++; bones = Math.max(bones, o.skeleton.bones.length); }
+      for (const m of [].concat(o.material)) mats.set(m.name || m.uuid, m);
+    }
+  });
+  if (maps) {
+    const tl = new THREE.TextureLoader();
+    for (const [matName, spec] of Object.entries(maps)) {
+      const m = [...mats.values()].find((mm) => mm.name === matName); if (!m) continue;
+      for (const [slot, file] of Object.entries(spec)) {
+        if (typeof file !== 'string') { m[slot] = file; continue; }
+        const t = await tl.loadAsync(file); t.flipY = false; if (slot === 'map' || slot === 'emissiveMap') t.colorSpace = THREE.SRGBColorSpace; m[slot] = t;
+      }
+      m.needsUpdate = true;
+    }
+  }
+  scene.add(root); current = root;
+  mixer = null;
+  if (res.animations.length) {
+    mixer = new THREE.AnimationMixer(root);
+    const clip = res.animations.find((a) => a.name === anim) || res.animations[0];
+    mixer.clipAction(clip).play(); mixer.update(1.0);
+  }
+  // 以实际姿态（含蒙皮）计算包围盒，并把模型落到地面上
+  root.updateMatrixWorld(true);
+  let bb = new THREE.Box3().setFromObject(root, true);
+  root.position.y -= bb.min.y; root.updateMatrixWorld(true);
+  bb = new THREE.Box3().setFromObject(root, true);
+  const sz = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3());
+  lines.push(`尺寸 ${sz.x.toFixed(2)} × ${sz.y.toFixed(2)} × ${sz.z.toFixed(2)} 米（x 宽 · y 高 · z 深）  范围 y ${bb.min.y.toFixed(2)}..${bb.max.y.toFixed(2)}`);
+  lines.push(`三角形 ${Math.round(tris)}  蒙皮网格 ${skinned}  骨骼 ${bones}`);
+  lines.push('材质：' + [...mats.values()].map((m) => `${m.name}${m.map ? '[map]' : ''}${m.normalMap ? '[n]' : ''}${m.emissiveMap ? '[e]' : ''}${m.transparent ? '[透明]' : ''}`).join('  '));
+  lines.push('动画：' + (res.animations.map((a) => `${a.name}(${a.duration.toFixed(1)}s,${a.tracks.length})`).join('  ') || '无'));
+  lines.push(`落地偏移 ${root.position.y.toFixed(2)} 米（模型原点到实际最低点）`);
+  // 头部大致方向：找名称含 head 的骨骼，判断模型朝向
+  let head = null; root.traverse((o) => { if (!head && /head/i.test(o.name) && o.isBone) head = o; });
+  if (head) { const hp = head.getWorldPosition(new THREE.Vector3()); lines.push(`head 骨骼位置 (${hp.x.toFixed(2)}, ${hp.y.toFixed(2)}, ${hp.z.toFixed(2)}) → 模型朝向 ${hp.z > c.z ? '+Z' : '-Z'}`); }
+  info.textContent = lines.join('\n');
+  const r = sz.length() * 0.5 * frame;
+  camera.position.set(c.x + Math.sin(yaw) * Math.cos(pitch) * r * 2, c.y + Math.sin(pitch) * r * 2, c.z + Math.cos(yaw) * Math.cos(pitch) * r * 2);
+  camera.lookAt(c); camera.far = r * 40; camera.updateProjectionMatrix();
+  return { size: sz.toArray(), tris: Math.round(tris), bones, anims: res.animations.map((a) => [a.name, +a.duration.toFixed(2)]), mats: [...mats.keys()] };
+};
+// 一排摆开 glb 里的多个模型（如 trees.glb 各树种的 LOD0），尺寸写在信息栏
+window.lineup = async function (url, { match = /_0$/, gap = 4 } = {}) {
+  if (current) scene.remove(current);
+  const res = await new GLTFLoader().loadAsync(url);
+  const root = new THREE.Group(), lines = [url];
+  let x = 0;
+  for (const n of [...res.scene.children]) {
+    if (!match.test(n.name)) continue;
+    n.traverse((o) => { if (o.isMesh) o.castShadow = o.receiveShadow = true; });
+    const bb = new THREE.Box3().setFromObject(n), w = bb.max.x - bb.min.x;
+    n.position.set(x - bb.min.x, -bb.min.y, 0);
+    x += w + gap;
+    root.add(n);
+    lines.push(`${n.name}: 宽 ${w.toFixed(1)} 高 ${(bb.max.y - bb.min.y).toFixed(1)} 米`);
+  }
+  scene.add(root); current = root; mixer = null;
+  info.textContent = lines.join('\n');
+  camera.position.set(x / 2, 12, x * 0.62); camera.lookAt(x / 2, 3, 0); camera.far = 2000; camera.updateProjectionMatrix();
+  return lines;
+};
+window.setCam = (pos, at) => { camera.position.set(...pos); camera.lookAt(...at); };
+window.shot = async (name, w = 1280, h = 800) => {
+  const keep = renderer.getSize(new THREE.Vector2());
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+  renderer.render(scene, camera);
+  const blob = await new Promise((r) => renderer.domElement.toBlob(r, 'image/jpeg', 0.9));
+  renderer.setSize(keep.x || innerWidth, keep.y || innerHeight, false);
+  camera.aspect = (keep.x || innerWidth) / (keep.y || innerHeight); camera.updateProjectionMatrix();
+  return (await fetch('/__shot/' + name, { method: 'POST', body: blob })).status;
+};
+window.advance = (t) => { if (mixer) mixer.update(t); };
+(function loop() { requestAnimationFrame(loop); if (mixer) mixer.update(clock.getDelta()); renderer.render(scene, camera); })();
+info.textContent = '就绪：view(url, opts)';
+</script>
+</body>
+</html>

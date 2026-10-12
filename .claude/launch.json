@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "qinglan",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "serve.py",
+        "8130"
+      ],
+      "port": 8130
+    },
+    {
+      "name": "qinglan-dev",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "serve.py",
+        "8131"
+      ],
+      "port": 8131
+    }
+  ]
+}
